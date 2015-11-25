@@ -82,7 +82,6 @@ word    lDelay     = 484;  // Long Delay about 1/2 of bit duration, 1/4 + 1/2 = 
 byte    polarity   = 1;    // 0 for lo->hi==1 or 1 for hi->lo==1 for Polarity, sets tempBit at start
 byte    tempBit    = 1;    // Reflects the required transition polarity
 boolean firstZero  = false;// flags when the first '0' is found.
-boolean noErrors   = true; // flags if signal does not follow Manchester conventions
 // Variables for Header detection
 byte    headerBits = 10;   // The number of ones expected to make a valid header
 byte    headerHits = 0;    // Counts the number of "1"s to determine a header
@@ -123,13 +122,13 @@ void setup() {
 
 void loop() {
   tempBit = polarity; // these begin the same for a packet
-  noErrors = true;
   firstZero = false;
   headerHits = 0;
   nosBits = 6;
   nosBytes = 0;
-  while (noErrors && (nosBytes < maxBytes)) {
-    while (digitalRead(RxPin)!=tempBit) {
+
+  while (nosBytes < maxBytes) {
+    while (digitalRead(RxPin) != tempBit) {
       // pause here until a transition is found
     } // at Data transition, half way through bit pattern, this should be where RxPin==tempBit
 
@@ -137,41 +136,40 @@ void loop() {
     // 3/4 the way through, if RxPin has changed it is definitely an error
 
     if (digitalRead(RxPin) != tempBit) {
-      noErrors = false; // something has gone wrong, polarity has changed too early, ie always an error
+      break; // something has gone wrong, polarity has changed too early, ie always an error
     } // exit and retry
-    else {
-      delayMicroseconds(lDelay);
-      // now 1 quarter into the next bit pattern,
 
-      if (digitalRead(RxPin) == tempBit) { // if RxPin has not swapped, then bitWaveform is swapping
-        // If the header is done, then it means data change is occuring ie 1->0, or 0->1
-        // data transition detection must swap, so it loops for the opposite transitions
-        tempBit = tempBit ^ 1;
-      } // end of detecting no transition at end of bit waveform, ie end of previous bit waveform same as start of next bitwaveform
+    delayMicroseconds(lDelay);
+    // now 1 quarter into the next bit pattern,
 
-      // Now process the tempBit state and make data definite 0 or 1's, allow possibility of Pos or Neg Polarity
-      byte bitState = tempBit ^ polarity; // if polarity=1, invert the tempBit or if polarity=0, leave it alone.
-      if (bitState == 1) { // 1 data could be header or packet
-        if (!firstZero) {
-          headerHits++;
-        }
-        else {
-          add(bitState); // already seen first zero so add bit in
-        }
-      } // end of dealing with ones
-      else {  // bitState==0 could first error, first zero or packet
-        // if it is header there must be no "zeroes" or errors
-        if (headerHits < headerBits) {
-          // Still in header checking phase, more header hits required
-          noErrors=false;// landing here means header is corrupted, so it is probably an error
-        } // end of detecting a "zero" inside a header
-        else {
-          firstZero = true;
-          add(bitState);
-        } // end of dealing with a first zero
-      } // end of dealing with zero's (in header, first or later zeroes)
-    } // end of first error check
-  } // end of while noErrors=true and getting packet of bytes
+    if (digitalRead(RxPin) == tempBit) { // if RxPin has not swapped, then bitWaveform is swapping
+      // If the header is done, then it means data change is occuring ie 1->0, or 0->1
+      // data transition detection must swap, so it loops for the opposite transitions
+      tempBit = tempBit ^ 1;
+    } // end of detecting no transition at end of bit waveform, ie end of previous bit waveform same as start of next bitwaveform
+
+    // Now process the tempBit state and make data definite 0 or 1's, allow possibility of Pos or Neg Polarity
+    byte bitState = tempBit ^ polarity; // if polarity=1, invert the tempBit or if polarity=0, leave it alone.
+    if (bitState == 1) { // 1 data could be header or packet
+      if (!firstZero) {
+        headerHits++;
+      }
+      else {
+        add(bitState); // already seen first zero so add bit in
+      }
+    } // end of dealing with ones
+    else {  // bitState==0 could first error, first zero or packet
+      // if it is header there must be no "zeroes" or errors
+      if (headerHits < headerBits) {
+        // Still in header checking phase, more header hits required
+        break; // landing here means header is corrupted, so it is probably an error
+      } // end of detecting a "zero" inside a header
+      else {
+        firstZero = true;
+        add(bitState);
+      } // end of dealing with a first zero
+    } // end of dealing with zero's (in header, first or later zeroes)
+  } // end of while getting packet of bytes
 } // end of mainloop
 
 // Read the binary data from the bank and apply conversions where necessary to scale and format data
@@ -188,20 +186,20 @@ void add(byte bitData) {
 
 // Subroutines to extract data from Manchester encoding and error checking
 
-// Identify channels 1 to 8 by looking at 3 bits in byte 3
-    int stnId = ((manchester[3] & B01110000) / 16) + 1;
+// Identify channels 0 to 7 by looking at 3 bits in byte 3
+    int stnId = (manchester[3] & B01110000) / 16;
 
 // Identify sensor by looking for sensorID in byte 1 (F007th Ambient Thermo-Hygrometer = 0x45)
     dataType = manchester[1];
 
 // Gets raw temperature from bytes 3 and 4 (note this is neither C or F but a value from the sensor)
-    Newtemp = (float((manchester[3] & B00000111) * 256) + manchester[4]);
+    Newtemp = float((manchester[3] & B00000111) * 256) + manchester[4];
 
 // Gets humidity data from byte 5
-    Newhum = (manchester[5]);
+    Newhum = manchester[5];
 
 // Checks sensor is a F007th with a valid humidity reading equal or less than 100
-    if ((dataType == 0x45) && (Newhum <= 100)) {
+    if (dataType == 0x45 && Newhum <= 100) {
       saveReading(stnId, Newtemp, Newhum);
     }
   }
@@ -209,40 +207,40 @@ void add(byte bitData) {
 
 void saveReading(int stnId, int newTemp, int newHum) {
   bool sendData = false;
-  if (stnId >= 1 && stnId <= 8) {
+  if (stnId >= 0 && stnId <= 7) {
 
 // If the raw temperature is 720 (default when sketch started so first reading), accept the new readings as the temperature and humidity on channel 1
-    if (chTemp[stnId - 1] == 720) {
-      chTemp[stnId - 1] = newTemp;
-      chHum[stnId - 1] = newHum;
+    if (chTemp[stnId] == 720) {
+      chTemp[stnId] = newTemp;
+      chHum[stnId] = newHum;
       sendData = true;
     }
 // If the raw temperature is other than 720 (so a subsequent reading), check that it is close to the previous reading before accepting as the new channel 1 reading
     else {
-      differencetemp = newTemp - chTemp[stnId - 1];
-      differencehum = newHum - chHum[stnId - 1];
+      differencetemp = newTemp - chTemp[stnId];
+      differencehum = newHum - chHum[stnId];
       if ((differencetemp < 20 && differencetemp > - 20) && (differencehum < 5 && differencehum > - 5)) {
-        chTemp[stnId - 1] = newTemp;
-        chHum[stnId - 1] = newHum;
+        chTemp[stnId] = newTemp;
+        chHum[stnId] = newHum;
         sendData = true;
       }
     }
 
     unsigned long now = millis();
 
-    if (sendData && (chLastRecv[stnId - 1] > now || (now - chLastRecv[stnId - 1]) > 1000)) {
-      Serial.print(stnId);
+    if (sendData && (chLastRecv[stnId] > now || (now - chLastRecv[stnId]) > 1000)) {
+      Serial.print(stnId + 1);
       Serial.print(":");
       Serial.print(float((newTemp - 400) / 10.0),1);
       Serial.print(":");
       Serial.println(newHum);
-      chLastRecv[stnId - 1] = now;
+      chLastRecv[stnId] = now;
     }
   }
 }
 
-void eraseManchester(){
-  for( int j=0; j < 4; j++) {
+void eraseManchester() {
+  for(int j=0; j < 4; j++) {
     manchester[j] = j;
   }
 }
