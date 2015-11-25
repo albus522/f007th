@@ -231,7 +231,7 @@ void saveReading(int stnId, int newTemp, int newHum) {
     if (sendData && (chLastRecv[stnId] > now || (now - chLastRecv[stnId]) > 1000)) {
       Serial.print(stnId + 1);
       Serial.print(":");
-      Serial.print(float((newTemp - 400) / 10.0),1);
+      Serial.print(newTemp - 400);
       Serial.print(":");
       Serial.println(newHum);
       chLastRecv[stnId] = now;
